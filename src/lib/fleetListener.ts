@@ -1,8 +1,12 @@
 // Wires the broker's vessel.ais.fleet control plane to the channels and
 // messages stores. Each fleet "appeared" event spawns a Slack-style
 // channel for that vessel; subsequent updates refresh the vessel sidecar.
+// Also forwards status transitions into aisStore so the map's per-status
+// color expression has data to react to (dark/lost dots), and removes
+// lost vessels from the map record entirely.
 
 import { broker } from './broker';
+import { useAisStore } from '@/store/aisStore';
 import { useChannelsStore } from '@/store/channelsStore';
 import type { ZmesgEnvelope } from '@/types/zmesg';
 import type { VesselSummary } from '@/types';
@@ -66,13 +70,18 @@ function handle(env: ZmesgEnvelope) {
   }
 
   if (p.event === 'lost') {
+    // Drop the map record so the dot disappears; the channel hangs around
+    // greyed-out so chat history stays accessible.
+    useAisStore.getState().remove(p.mmsi);
     if (!store.channels[p.channelId]) return;
     store.markVesselStatus(p.channelId, 'lost');
     return;
   }
 
   if (p.event === 'anomaly') {
-    // Anomaly stream — only mark dark if the vessel is currently known.
+    // Anomaly stream — paint the map dot orange even if we never saw a
+    // channel for this MMSI (e.g. dark-on-first-contact edge case).
+    useAisStore.getState().markStatus(p.mmsi, 'dark');
     if (!store.channels[p.channelId]) {
       store.upsert({
         id: p.channelId,
@@ -87,7 +96,8 @@ function handle(env: ZmesgEnvelope) {
     return;
   }
 
-  // update / static-update
+  // update / static-update — a 'live' signal clears any prior dark.
+  useAisStore.getState().markStatus(p.mmsi, 'live');
   if (!store.channels[p.channelId]) {
     store.upsert({
       id: p.channelId,

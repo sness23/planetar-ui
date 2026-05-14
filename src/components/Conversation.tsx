@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { channels } from '@/data/mocks';
 import { useBroker } from '@/hooks/useBroker';
 import { useChannelMessages } from '@/hooks/useChannelMessages';
 import { chatTopic } from '@/lib/topic';
+import { useChannelsStore } from '@/store/channelsStore';
 import { useLayoutStore } from '@/store/layoutStore';
+import type { VesselSummary } from '@/types';
 import type { ChatPayload, ZmesgEnvelope } from '@/types/zmesg';
 import { isChatEnvelope } from '@/types/zmesg';
 
@@ -56,16 +57,77 @@ function statusText(status: 'connecting' | 'open' | 'closed') {
   return 'bus · offline';
 }
 
+function formatLatLon(lat: number, lon: number) {
+  const ns = lat >= 0 ? 'N' : 'S';
+  const ew = lon >= 0 ? 'E' : 'W';
+  return `${Math.abs(lat).toFixed(4)}${ns} ${Math.abs(lon).toFixed(4)}${ew}`;
+}
+
+function ageOf(ns?: string): string {
+  if (!ns) return '—';
+  try {
+    const ms = Number(BigInt(ns) / 1_000_000n);
+    const dt = Date.now() - ms;
+    if (dt < 0) return 'now';
+    if (dt < 1000) return 'now';
+    if (dt < 60_000) return `${Math.floor(dt / 1000)}s ago`;
+    if (dt < 3_600_000) return `${Math.floor(dt / 60_000)}m ago`;
+    return `${Math.floor(dt / 3_600_000)}h ago`;
+  } catch {
+    return '—';
+  }
+}
+
+function VesselPin({ vessel }: { vessel: VesselSummary }) {
+  const status = vessel.status ?? 'live';
+  const moored = typeof vessel.sog === 'number' && vessel.sog < 0.3;
+  return (
+    <div className={`vessel-pin vessel-pin-${status}`}>
+      <div className="vessel-pin-head">
+        <span className="vessel-pin-name">{vessel.name}</span>
+        <span className="vessel-pin-mmsi">MMSI {vessel.mmsi}</span>
+        {vessel.type ? <span className="vessel-pin-chip">{vessel.type}</span> : null}
+        {vessel.flag ? <span className="vessel-pin-chip">{vessel.flag}</span> : null}
+        <span className="vessel-pin-spacer" />
+        <span className={`vessel-pin-status vessel-pin-status-${status}`}>
+          {status === 'lost' ? 'lost' : status === 'dark' ? 'AIS dark' : moored ? 'moored' : 'live'}
+        </span>
+      </div>
+      <div className="vessel-pin-row">
+        <span className="vessel-pin-label">pos</span>
+        <span className="vessel-pin-value">
+          {typeof vessel.lat === 'number' && typeof vessel.lon === 'number'
+            ? formatLatLon(vessel.lat, vessel.lon)
+            : '—'}
+        </span>
+        <span className="vessel-pin-label">sog</span>
+        <span className="vessel-pin-value">
+          {typeof vessel.sog === 'number' ? `${vessel.sog.toFixed(1)} kn` : '—'}
+        </span>
+        <span className="vessel-pin-label">cog</span>
+        <span className="vessel-pin-value">
+          {typeof vessel.cog === 'number' ? `${Math.round(vessel.cog)}°` : '—'}
+        </span>
+        {vessel.destination ? (
+          <>
+            <span className="vessel-pin-label">dest</span>
+            <span className="vessel-pin-value">⟦{vessel.destination}⟧</span>
+          </>
+        ) : null}
+        <span className="vessel-pin-spacer" />
+        <span className="vessel-pin-age">last AIS · {ageOf(vessel.lastSeenNs)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function Conversation() {
   const currentChannelId = useLayoutStore((s) => s.currentChannelId);
   const headerVisible = useLayoutStore((s) => s.paneVisibility.header);
   const noteInteraction = useLayoutStore((s) => s.noteInteraction);
   const setSelectedEntity = useLayoutStore((s) => s.setSelectedEntity);
 
-  const channel = useMemo(
-    () => channels.find((c) => c.id === currentChannelId),
-    [currentChannelId],
-  );
+  const channel = useChannelsStore((s) => s.channels[currentChannelId]);
   const topic = useMemo(() => (channel ? chatTopic(channel) : null), [channel]);
 
   const envelopes = useChannelMessages(topic);
@@ -116,7 +178,8 @@ export function Conversation() {
         </header>
       )}
       <div className="conv-stream" ref={streamRef}>
-        {envelopes.length === 0 ? (
+        {channel?.vessel ? <VesselPin vessel={channel.vessel} /> : null}
+        {envelopes.length === 0 && !channel?.vessel ? (
           <div style={{ color: 'var(--text-dim)', fontSize: 12, fontFamily: 'var(--mono)', padding: '8px 0' }}>
             no envelopes yet on <code>{topic}</code> — waiting for traffic.
           </div>

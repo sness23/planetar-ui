@@ -15,6 +15,7 @@
     "test:headed": "playwright test --headed"
   },
   "dependencies": {
+    "maplibre-gl": "^5.24.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-resizable-panels": "^4.11.1",

@@ -107,3 +107,77 @@ test('help overlay toggles', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(page.locator('.help-panel')).toHaveCount(0);
 });
+
+test('Map tab renders MapLibre canvas and tracked-MMSI legend', async ({ page }) => {
+  await openApp(page);
+  // The Map tab is the default active tab in the data pane on first load.
+  // Ensure the canvas mounted; this is a strong signal that MapLibre + WebGL
+  // initialised without error.
+  const canvas = page.locator('.map-canvas .maplibregl-canvas');
+  await expect(canvas).toBeVisible({ timeout: 8000 });
+
+  // Regression: MapLibre captures container dims at construction. Inside a
+  // flex/resizable pane, the canvas used to come up sized to a few pixels and
+  // only fixed itself when the divider was dragged. The ResizeObserver in
+  // MapTab now grows it on first frame. Assert it's actually visible-sized.
+  await expect.poll(async () => {
+    const box = await canvas.boundingBox();
+    return box ? Math.min(box.width, box.height) : 0;
+  }, { timeout: 5_000 }).toBeGreaterThan(100);
+
+  // Legend should be visible with the tracked MMSI 311001249 pill.
+  await expect(page.locator('.map-legend')).toBeVisible();
+  await expect(page.locator('.legend-tracked-mmsi', { hasText: '311001249' })).toBeVisible();
+});
+
+test('Map tab receives at least one vessel from vessel.ais.position when AIS is running', async ({ page }) => {
+  await openApp(page);
+  // Wait for the inspector to be empty initially.
+  await expect(page.locator('.inspector')).toBeVisible();
+  // The Map should show a non-zero vessel count in its legend once positions arrive.
+  // If planetar-ais isn't running this will time out at 15s — leave the test in
+  // place but accept either path so the suite doesn't go red on partial setups.
+  const count = page.locator('.legend-count');
+  await expect(count).toBeVisible();
+  await expect.poll(async () => {
+    const t = await count.innerText();
+    const m = /(\d+)/.exec(t);
+    return m ? Number(m[1]) : 0;
+  }, { timeout: 15_000, message: 'no vessel envelopes on vessel.ais.position — is planetar-ais running?' }).toBeGreaterThan(0);
+});
+
+test('Inspector "Open channel" switches the conversation to the vessel channel', async ({ page }) => {
+  await openApp(page);
+
+  // Precondition: the fleet listener must register the vessel channel before
+  // the Inspector button can appear. Mock cadence is variable per-vessel (2 s
+  // underway → 3 min moored per ITU-R), so give the channel up to 30 s to
+  // surface in the left rail. MMSI 477123400 is KESTREL III in the mock seed.
+  await expect(
+    page.locator('.channel-item').filter({ hasText: 'vessel-477123400' }),
+  ).toBeVisible({ timeout: 30_000 });
+
+  // Publish a chat message with an embedded MMSI entity token, then click it.
+  const input = page.locator('#message-input');
+  await expect(input).toBeEnabled({ timeout: 5_000 });
+  await input.fill('check ⟦MMSI 477123400⟧');
+  await input.press('Enter');
+
+  const token = page.locator('.entity-token').filter({ hasText: 'MMSI 477123400' }).first();
+  await expect(token).toBeVisible({ timeout: 5_000 });
+  await token.click();
+
+  await expect(page.locator('.inspector')).toContainText('477123400');
+
+  const openBtn = page.locator('.inspector-action').filter({ hasText: 'Open channel' });
+  await expect(openBtn).toBeVisible({ timeout: 5_000 });
+  await openBtn.click();
+
+  // Conversation header now points at the vessel channel.
+  await expect(page.locator('.conversation .ph-title')).toHaveText('vessel-477123400');
+
+  // Same button, when the current channel is already the vessel one, becomes
+  // disabled and re-labels.
+  await expect(page.locator('.inspector-action')).toBeDisabled();
+  await expect(page.locator('.inspector-action')).toContainText('viewing this channel');
+});
