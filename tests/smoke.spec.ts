@@ -181,3 +181,82 @@ test('Inspector "Open channel" switches the conversation to the vessel channel',
   await expect(page.locator('.inspector-action')).toBeDisabled();
   await expect(page.locator('.inspector-action')).toContainText('viewing this channel');
 });
+
+test('Map drag disables follow-mode, Recenter button restores it', async ({ page }) => {
+  await openApp(page);
+
+  // Establish a selection so follow-mode has something to track. Same
+  // precondition as the Open-channel test — wait for KESTREL III's fleet
+  // channel to register, then publish a chat message with its MMSI token.
+  await expect(
+    page.locator('.channel-item').filter({ hasText: 'vessel-477123400' }),
+  ).toBeVisible({ timeout: 30_000 });
+
+  const input = page.locator('#message-input');
+  await expect(input).toBeEnabled({ timeout: 5_000 });
+  await input.fill('look at ⟦MMSI 477123400⟧');
+  await input.press('Enter');
+
+  const token = page.locator('.entity-token').filter({ hasText: 'MMSI 477123400' }).first();
+  await expect(token).toBeVisible({ timeout: 5_000 });
+  await token.click();
+  // Inspector populates, follow-mode is engaged → no button yet.
+  await expect(page.locator('.inspector')).toContainText('477123400');
+  await expect(page.locator('.map-recenter')).toHaveCount(0);
+
+  // Drag the canvas. MapLibre fires 'movestart' with an `originalEvent`,
+  // tripping the follow-mode-off handler.
+  const canvas = page.locator('.maplibregl-canvas');
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('canvas has no bounding box');
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 120, cy + 80, { steps: 10 });
+  await page.mouse.up();
+
+  await expect(page.locator('.map-recenter')).toBeVisible({ timeout: 2_000 });
+
+  // Click Recenter → follow re-engages, button hides again.
+  await page.locator('.map-recenter').click();
+  await expect(page.locator('.map-recenter')).toHaveCount(0, { timeout: 2_000 });
+});
+
+test('Map canvas stays square after "Open channel" (no horizontal stretch)', async ({ page }) => {
+  await openApp(page);
+
+  await expect(
+    page.locator('.channel-item').filter({ hasText: 'vessel-477123400' }),
+  ).toBeVisible({ timeout: 30_000 });
+
+  // Select the vessel + open its channel — this is the exact gesture that
+  // historically left the canvas internal width frozen while the data pane's
+  // CSS width grew, producing horizontally-stretched ovals.
+  const input = page.locator('#message-input');
+  await expect(input).toBeEnabled({ timeout: 5_000 });
+  await input.fill('look at ⟦MMSI 477123400⟧');
+  await input.press('Enter');
+  const token = page.locator('.entity-token').filter({ hasText: 'MMSI 477123400' }).first();
+  await expect(token).toBeVisible({ timeout: 5_000 });
+  await token.click();
+  const openBtn = page.locator('.inspector-action').filter({ hasText: 'Open channel' });
+  await expect(openBtn).toBeVisible({ timeout: 5_000 });
+  await openBtn.click();
+  await expect(page.locator('.conversation .ph-title')).toHaveText('vessel-477123400');
+
+  // The canvas internal width should equal its CSS width × devicePixelRatio
+  // (within a few px of rounding). Anything else means MapLibre captured
+  // dimensions before the layout settled.
+  await expect.poll(async () => {
+    return page.evaluate(() => {
+      const c = document.querySelector('.maplibregl-canvas') as HTMLCanvasElement | null;
+      if (!c) return { ok: false, ratio: 0, internal: 0, css: 0 };
+      const css = c.getBoundingClientRect().width;
+      const internal = c.width;
+      const expected = css * (window.devicePixelRatio || 1);
+      const ratio = expected > 0 ? internal / expected : 0;
+      return { ok: Math.abs(1 - ratio) < 0.05, ratio, internal, css };
+    });
+  }, { timeout: 4_000, message: 'canvas internal width drifted from CSS width — stretching expected' }).toMatchObject({ ok: true });
+});

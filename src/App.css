@@ -413,6 +413,40 @@
   font-style: italic;
 }
 
+.map-recenter {
+  position: absolute;
+  top: 12px;
+  right: 64px; /* leave room for MapLibre's zoom control to the right */
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(11, 16, 28, 0.94);
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: var(--sans);
+  color: var(--accent);
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  box-shadow: var(--shadow);
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+.map-recenter:hover {
+  background: rgba(111, 182, 255, 0.18);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.map-recenter-glyph {
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1;
+}
+
 .tab-stub {
   text-align: center;
   padding: 32px;

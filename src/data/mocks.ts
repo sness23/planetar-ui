@@ -13,7 +13,8 @@ export const channels: Channel[] = [
   { id: 'pac-hyd', serverId: 'pac', name: 'hydrophone-alerts', section: 'channels', unread: 1 },
   { id: 'pac-rf', serverId: 'pac', name: 'rf-emitters', section: 'channels' },
   { id: 'pac-gen', serverId: 'pac', name: 'general', section: 'channels' },
-  { id: 'pac-t1', serverId: 'pac', name: 'vessel-477123400', section: 'threads' },
+  // Real per-vessel channels are populated dynamically by the AIS fleet
+  // listener; keep one example thread + one alert for sidebar variety.
   { id: 'pac-t2', serverId: 'pac', name: 'sar-2026-05-13-08', section: 'threads' },
   { id: 'pac-a1', serverId: 'pac', name: 'dark-vessel-pacnw', section: 'alerts', unread: 2 },
 ];

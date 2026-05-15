@@ -10,7 +10,7 @@
 // Tracked vessels (see @/types/ais TRACKED_MMSI) render with a distinct
 // "tracked" style and the map flies to them on first sighting.
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type Map as MapLibreMap, type MapMouseEvent } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useAisPositions } from '@/hooks/useAisPositions';
@@ -99,6 +99,12 @@ export function MapTab() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const flownToTrackedRef = useRef<Set<number>>(new Set());
+
+  // Follow mode: when true the camera tracks position updates for the selected
+  // vessel; when false (user panned/zoomed/dragged) the camera stays put and a
+  // "Recenter" button appears to re-engage tracking.
+  const [followMode, setFollowMode] = useState(true);
+  const prevSelectedMmsiRef = useRef<number | null>(null);
 
   const vessels = useAisStore((s) => s.byMmsi);
   const selectedEntityId = useLayoutStore((s) => s.selectedEntityId);
@@ -203,30 +209,84 @@ export function MapTab() {
     map.on('mouseleave', VESSEL_TRACKED_LAYER, () => { map.getCanvas().style.cursor = ''; });
 
     /*
-     * MapLibre captures container dimensions at construction. When the data
-     * pane mounts inside react-resizable-panels its first layout often
-     * resolves AFTER our useEffect fires, so the canvas can end up sized to a
-     * few pixels — visible as a black rectangle until the user drags the
-     * resize divider. Watch the container with a ResizeObserver and call
-     * map.resize() on every change.
+     * Drop follow-mode the moment the user moves the camera themselves
+     * (drag-pan, scroll-zoom, pinch). Programmatic easeTo/flyTo from our own
+     * follow effect fire 'movestart' without an `originalEvent`, so they
+     * don't trip this handler — that's the key distinction.
+     */
+    map.on('movestart', (e) => {
+      if ((e as unknown as { originalEvent?: Event }).originalEvent) {
+        setFollowMode(false);
+      }
+    });
+
+    /*
+     * MapLibre captures container dimensions at construction. The map lives
+     * inside a PanelGroup that re-mounts on channel switch — and the new
+     * channel's stored layout (per-channel pane widths) settles a frame or
+     * two after the map's useEffect fires. The result is a canvas captured
+     * at the wrong width: tiny on first paint (black rectangle), or stretched
+     * horizontally if the data pane grew after construction.
      *
-     * Also poke it on the next frame to catch the race in the common case
-     * where the container is already a few pixels off when we observe it.
+     * Defence: a ResizeObserver on the container fires whenever its size
+     * shifts AND a small chain of sequential frame-and-timeout resizes
+     * during the first ~300ms catches whatever the observer missed.
      */
     const ro = new ResizeObserver(() => map.resize());
     if (containerRef.current) ro.observe(containerRef.current);
-    const raf1 = requestAnimationFrame(() => map.resize());
-    const raf2 = requestAnimationFrame(() => map.resize());
+
+    const rafIds: number[] = [];
+    const timeoutIds: ReturnType<typeof setTimeout>[] = [];
+    let cancelled = false;
+    const settle = () => {
+      if (cancelled) return;
+      map.resize();
+    };
+    // Five sequential frames covers ~80 ms of layout settling at 60fps.
+    const chain = (n: number) => {
+      if (cancelled || n === 0) return;
+      rafIds.push(requestAnimationFrame(() => {
+        settle();
+        chain(n - 1);
+      }));
+    };
+    chain(5);
+    // Plus two longer catch-ups for slow layout transitions.
+    timeoutIds.push(setTimeout(settle, 150));
+    timeoutIds.push(setTimeout(settle, 400));
 
     mapRef.current = map;
     return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
+      cancelled = true;
+      for (const id of rafIds) cancelAnimationFrame(id);
+      for (const id of timeoutIds) clearTimeout(id);
       ro.disconnect();
       map.remove();
       mapRef.current = null;
     };
   }, [setSelectedEntity]);
+
+  // ---------- channel change → schedule another round of resizes ----------
+  // The PanelGroup is keyed on currentChannelId; in most cases this means a
+  // fresh MapTab and the lifecycle effect above covers it. But if React
+  // happens to reuse this MapTab instance (e.g. tab navigation that keeps
+  // the same group identity), force the existing map to re-measure too.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const rafs: number[] = [];
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    let cancelled = false;
+    const tick = () => { if (!cancelled) map.resize(); };
+    rafs.push(requestAnimationFrame(() => { tick(); rafs.push(requestAnimationFrame(tick)); }));
+    timeouts.push(setTimeout(tick, 100));
+    timeouts.push(setTimeout(tick, 300));
+    return () => {
+      cancelled = true;
+      for (const id of rafs) cancelAnimationFrame(id);
+      for (const id of timeouts) clearTimeout(id);
+    };
+  }, [currentChannelId]);
 
   // ---------- vessel source updates ----------
   useEffect(() => {
@@ -263,17 +323,44 @@ export function MapTab() {
     else map.once('load', apply);
   }, [selectedMmsi, vessels]);
 
-  // ---------- camera follows selection ----------
+  // ---------- selection-change → recenter once + re-enable follow ----------
   useEffect(() => {
+    if (selectedMmsi === prevSelectedMmsiRef.current) return;
+    prevSelectedMmsiRef.current = selectedMmsi;
+    if (selectedMmsi != null) setFollowMode(true);
+  }, [selectedMmsi]);
+
+  // ---------- while follow-mode is on, camera tracks position updates ----------
+  useEffect(() => {
+    if (!followMode || selectedMmsi == null) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const rec = vessels[selectedMmsi];
+    if (!rec) return;
+    map.easeTo({ center: [rec.latest.lon, rec.latest.lat], duration: 600, zoom: Math.max(map.getZoom(), 11) });
+  }, [followMode, selectedMmsi, vessels]);
+
+  const handleRecenter = useCallback(() => {
     const map = mapRef.current;
     if (!map || selectedMmsi == null) return;
     const rec = vessels[selectedMmsi];
     if (!rec) return;
-    map.easeTo({ center: [rec.latest.lon, rec.latest.lat], duration: 600, zoom: Math.max(map.getZoom(), 11) });
+    setFollowMode(true);
+    map.easeTo({ center: [rec.latest.lon, rec.latest.lat], duration: 700, zoom: Math.max(map.getZoom(), 12) });
   }, [selectedMmsi, vessels]);
 
   const records = Object.values(vessels);
   const trackedSeen = records.some((r) => isTracked(r.mmsi));
+
+  // Show the recenter button only when there's a vessel to recenter on AND
+  // the user has wandered off it (follow mode disengaged).
+  const recenterAvailable =
+    selectedMmsi != null && vessels[selectedMmsi] != null && !followMode;
+  const recenterLabel = (() => {
+    if (selectedMmsi == null) return null;
+    const v = vessels[selectedMmsi]?.latest;
+    return v?.name ?? `MMSI ${selectedMmsi}`;
+  })();
 
   return (
     <div className="map-tab">
@@ -294,6 +381,17 @@ export function MapTab() {
           <span className="legend-note">tracked vessel not yet reported</span>
         ) : null}
       </div>
+      {recenterAvailable ? (
+        <button
+          type="button"
+          className="map-recenter"
+          onClick={handleRecenter}
+          title={`Recenter on ${recenterLabel ?? 'vessel'} and resume follow`}
+        >
+          <span className="map-recenter-glyph">⌖</span>
+          Recenter
+        </button>
+      ) : null}
     </div>
   );
 }
