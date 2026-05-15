@@ -30,7 +30,7 @@ env). See `planetar-ais/README.md`.
 ```
 broker ─ vessel.ais.position ─► useAisPositions ─► aisStore.byMmsi (map dots, tracks)
 broker ─ vessel.ais.fleet    ─► fleetListener   ─► channelsStore (left-rail Vessels section)
-                                              └─► aisStore.markStatus / .remove (map state)
+                                              └─► aisStore.markStatus (map status paint)
 broker ─ chat.pac.vessel-N   ─► useChannelMessages (per-channel conversation pane)
 ```
 
@@ -58,11 +58,13 @@ that file for the literals.
    `update` / `anomaly` / `lost` branch, so dots actually change colour
    as the producer transitions a vessel.
 
-2. **Stale-vessel cleanup.** `aisStore.remove()` existed but nothing
-   called it. `fleetListener` now calls it on `event: 'lost'`, so dots
-   disappear after the producer's `LOST_AFTER_MS` silence threshold
-   (default 5 min). The channel stays around (greyed-out, chat history
-   intact) — only the map dot is scrubbed.
+2. **Lost-vessel handling.** `fleetListener` calls
+   `aisStore.markStatus(mmsi, 'lost')` on `event: 'lost'`. The map dot
+   stays at the last-known position, painted grey (`#5a647c`) by the
+   circle-color match — for dark-vessel detection work this is exactly
+   what the operator wants to see. Channel also greys.
+   `aisStore.remove()` is wired but currently unused; reserve it for
+   manual clear or for an eventual long-retention sweep.
 
 Comment near the top of `aisStore.ts` claimed `useFleet` forwards
 lifecycle events here — that function never existed. The new
@@ -94,11 +96,13 @@ These aren't blockers; flag in case they show up later.
   want this dynamic, the obvious paths are: an env-driven seed, a
   per-user pin store, or wiring it to the entity-selection model.
 
-- **No upper bound on `aisStore.byMmsi`.** Vessels that come, go, and
-  come back live forever in the map record (which is mostly fine —
-  the `remove()` path runs on `lost` after 5 min silence). But if a
-  vessel keeps oscillating in and out of the BBox the track will grow
-  to 256 points and stick. Acceptable for now.
+- **No upper bound on `aisStore.byMmsi`.** Lost vessels persist on the
+  map (deliberately — see "Lost-vessel handling"). The record set only
+  grows during a session. For a long-running watch this means hundreds
+  of grey ghosts could accumulate after a few hours. If that becomes a
+  problem, add a retention sweep that drops records whose `lastSeenMs`
+  is older than some configurable horizon (e.g. 4 h), or expose a
+  manual "clear lost" action.
 
 ---
 
@@ -136,8 +140,10 @@ Earlier work — already in place:
 - `src/App.css` — `.vessel-pin*`, `.channel-dark`, `.channel-lost`
 
 Today's fix:
-- `src/lib/fleetListener.ts` — forwards status into `aisStore`,
-  removes lost vessels from the map record.
+- `src/lib/fleetListener.ts` — forwards status into `aisStore` so the
+  map's color expression paints live/dark/lost correctly. Lost vessels
+  stay visible at their last-known position painted grey — the
+  dark-vessel demo wants that record, not a disappearance.
 
 ---
 

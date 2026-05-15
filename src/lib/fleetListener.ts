@@ -2,8 +2,9 @@
 // messages stores. Each fleet "appeared" event spawns a Slack-style
 // channel for that vessel; subsequent updates refresh the vessel sidecar.
 // Also forwards status transitions into aisStore so the map's per-status
-// color expression has data to react to (dark/lost dots), and removes
-// lost vessels from the map record entirely.
+// color expression has data to react to (dark/lost dots). Lost vessels
+// stay on the map painted grey — for dark-vessel detection work the
+// last-known position is the most useful signal there is.
 
 import { broker } from './broker';
 import { useAisStore } from '@/store/aisStore';
@@ -70,9 +71,10 @@ function handle(env: ZmesgEnvelope) {
   }
 
   if (p.event === 'lost') {
-    // Drop the map record so the dot disappears; the channel hangs around
-    // greyed-out so chat history stays accessible.
-    useAisStore.getState().remove(p.mmsi);
+    // Keep the map record in place — for dark-vessel work the operator
+    // *wants* the last-known position to persist, painted grey via the
+    // map's per-status circle-color match. Channel also greys.
+    useAisStore.getState().markStatus(p.mmsi, 'lost');
     if (!store.channels[p.channelId]) return;
     store.markVesselStatus(p.channelId, 'lost');
     return;
