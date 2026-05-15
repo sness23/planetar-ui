@@ -27,6 +27,14 @@ const PERSONAS = [
   { id: 'agent-fuse', name: 'fuse',    role: 'agent'   },
 ];
 
+// Channels owned by a dedicated autonomous producer rather than human
+// operators. #sar-detections is fed by the planetar-sat microservice — its
+// envelopes carry the agent-sat persona, matching the real service
+// (planetar-sat/src/planetar_sat/bus/chat.py).
+const CHANNEL_AGENT = {
+  'sar-detections': { id: 'agent-sat', name: 'sat', role: 'agent' },
+};
+
 const PHRASES = {
   'ais-anomalies': [
     'AIS gap on ⟦MMSI 477123400⟧ — 41 min, last seen 48.42N 123.18W',
@@ -35,11 +43,14 @@ const PHRASES = {
     'class A pings from ⟦MMSI 311045221⟧ in the SAR-only window — odd',
     'consolidating yesterday into a thread, see ⟦CASE-PNW-0512⟧',
   ],
+  // Lines mirror planetar-sat's detection_line / track_line formatting so the
+  // synthetic feed reads identically to real planetar-sat output.
   'sar-detections': [
-    'Sentinel-1 IW pass 14:02Z — 7 detections, 2 unmatched',
-    'detection cluster off La Pérouse, footprint ⟦SAR-2026-05-13-08⟧',
-    'no AIS within 8 nm of detection at 49.01N 125.71W',
-    'reprocessed with looser threshold, +3 hits',
+    'Sentinel-1 GRD ⟦S1A_IW_20260513T1402_juan-de-fuca_vv⟧ — 7 CFAR detections, 2 unmatched',
+    'Sentinel-1 GRD ⟦S1A_IW_20260513T0231_la-perouse_vv⟧ — 4 CFAR detections, 1 unmatched',
+    'track ⟦0c79d9c1⟧ updated — 48.4982°N 123.9218°W, 6.2 kn, 3 hits',
+    'track ⟦ec83adc2⟧ updated — 49.0140°N 125.7100°W, 0.0 kn, 1 hit',
+    'track ⟦7b1f04a3⟧ updated — 48.4350°N 123.9650°W, 11.4 kn, 8 hits',
   ],
   'eo-chips': [
     'Planet SkySat chips queued for the 3 dark candidates',
@@ -86,8 +97,8 @@ function connect() {
 
 function publish(topic) {
   if (!sock || !connected || !sock.writable) return;
-  const persona = PERSONAS[Math.floor(Math.random() * PERSONAS.length)];
   const tail = topic.split('.').pop();
+  const persona = CHANNEL_AGENT[tail] ?? PERSONAS[Math.floor(Math.random() * PERSONAS.length)];
   const list = PHRASES[tail] ?? PHRASES.general;
   const text = list[Math.floor(Math.random() * list.length)];
   const now = String(BigInt(Date.now()) * 1_000_000n);
