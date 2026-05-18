@@ -737,3 +737,123 @@
 .status-dot.offline {
   background: var(--text-dim);
 }
+
+/* ============ Entity graph (planetar-ontology Object API) ============ */
+.entity-graph {
+  height: 100%;
+  overflow-y: auto;
+  padding: 12px;
+  font-family: var(--mono);
+}
+.entity-graph-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+.entity-graph-title {
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+}
+.entity-conn {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.entity-conn.open {
+  color: var(--accent-good);
+}
+.entity-conn.closed {
+  color: var(--accent-hot);
+}
+.entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.entity-card {
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.entity-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.entity-name {
+  font-size: 13px;
+  color: var(--text);
+}
+.entity-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.entity-badge.alert {
+  color: var(--accent-hot);
+  border-color: var(--accent-hot);
+}
+.entity-badge.info {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.entity-badge.ok {
+  color: var(--accent-good);
+  border-color: var(--accent-good);
+}
+.entity-type {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 2px 0 8px;
+}
+.entity-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 11px;
+}
+.entity-fields dt {
+  color: var(--text-dim);
+}
+.entity-fields dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+.entity-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.entity-action {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.entity-action:hover:not(:disabled) {
+  border-color: var(--accent-hot);
+  color: var(--accent-hot);
+}
+.entity-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.entity-msg {
+  font-size: 10px;
+  color: var(--text-dim);
+}
